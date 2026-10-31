@@ -227,12 +227,13 @@ func (b *backend) updateTUN(rcfg *router.Config, dcfg *dns.OSConfig) (err error)
 	b.logger.Logf("updateTUN: detached FD")
 
 	// Create TUN device.
-	tunDev, _, err := tun.CreateUnmonitoredTUNFromFD(int(tunFD))
+	tunDev, tunName, err := tun.CreateUnmonitoredTUNFromFD(int(tunFD))
 	if err != nil {
 		closeFileDescriptor()
 		return err
 	}
-	b.logger.Logf("updateTUN: created TUN device")
+	b.logger.Logf("updateTUN: created TUN device %s", tunName)
+	setTailscaleInterface(tunName)
 
 	b.devices.add(tunDev)
 	b.logger.Logf("updateTUN: added TUN device")
@@ -254,6 +255,20 @@ func closeFileDescriptor() error {
 		return fmt.Errorf("error closing file descriptor: %w", err)
 	}
 	return nil
+}
+
+func setTailscaleInterface(name string) {
+	index := 0
+	err := netmon.ForeachInterface(func(i netmon.Interface, _ []netip.Prefix) {
+		if i.Name == name {
+			index = i.Index
+		}
+	})
+	if err != nil || index == 0 {
+		log.Printf("setTailscaleInterface: %s not found (err=%v)", name, err)
+		return
+	}
+	netmon.SetTailscaleInterfaceProps(name, index)
 }
 
 // CloseVPN closes any active TUN devices.
