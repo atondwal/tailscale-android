@@ -266,7 +266,12 @@ func (a *App) runBackend(ctx context.Context, hardwareAttestation bool) error {
 			// regenerating the DNS config but have the means to do
 			// that independently of userspace engine network changes which may
 			// eliminate some unnecessary work.
-			go b.NetworkChanged(i)
+			//
+			// Called inline so updates apply in the order Android sent them;
+			// one goroutine per update let an older interface name win the
+			// race. NetworkChanged does not block: InjectEvent is a
+			// non-blocking send.
+			b.NetworkChanged(i)
 		}
 	}
 }

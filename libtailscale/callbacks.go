@@ -31,10 +31,22 @@ var (
 )
 
 // ifname is the interface name retrieved from LinkProperties on network change. An empty string is used if there is no network available.
+//
+// Only the newest interface name matters, so a pending one that was never
+// received is replaced rather than the new one being dropped. Android can
+// deliver two updates within a millisecond of each other on a network change,
+// and dropping the second left the stale default route in place.
 func OnDNSConfigChanged(ifname string) {
-	select {
-	case onDNSConfigChanged <- ifname:
-	default:
+	for {
+		select {
+		case onDNSConfigChanged <- ifname:
+			return
+		default:
+		}
+		select {
+		case <-onDNSConfigChanged:
+		default:
+		}
 	}
 }
 

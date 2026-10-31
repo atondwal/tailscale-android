@@ -211,6 +211,16 @@ object NetworkChangeCallback {
       return
     }
 
+    // onAvailable registers a network with empty LinkProperties, and
+    // onCapabilitiesChanged can make it the default before
+    // onLinkPropertiesChanged fills them in. Pushing that placeholder would
+    // clear the gateway and default route interface; the real values follow
+    // within milliseconds.
+    if (info.linkProps.interfaceName == null) {
+      TSLog.d(TAG, "$why: default network has no link properties yet; not updating DNS")
+      return
+    }
+
     val sb = StringBuilder()
     for (ip in info.linkProps.dnsServers) {
       sb.append(ip.hostAddress).append(" ")
