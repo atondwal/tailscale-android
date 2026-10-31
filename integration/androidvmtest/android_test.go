@@ -55,7 +55,9 @@ const (
 	debugKeystorePass = "android"
 )
 
-func TestAndroidAuthKeyLogin(t *testing.T) {
+// requireAndroid skips the test unless an APK and adb are available on Linux.
+func requireAndroid(t *testing.T) {
+	t.Helper()
 	if runtime.GOOS != "linux" {
 		t.Skip("Android integration test currently only runs on Linux")
 	}
@@ -65,14 +67,19 @@ func TestAndroidAuthKeyLogin(t *testing.T) {
 	if _, err := exec.LookPath(*adbPath); err != nil {
 		t.Skipf("adb not found: %v", err)
 	}
+}
 
+// startTestControl runs testcontrol with its own DERP and STUN, and returns
+// it with its URL as reachable from this host and from the emulator.
+func startTestControl(t *testing.T) (control *testcontrol.Server, localURL, androidURL string) {
+	t.Helper()
 	advertisedDERPHost := *derpHost
 	if advertisedDERPHost == "" {
 		advertisedDERPHost = nonLoopbackIPv4(t)
 	}
 	t.Logf("test DERP/STUN host: %s", advertisedDERPHost)
 	derpMap := runDERPAndSTUN(t, advertisedDERPHost)
-	control := &testcontrol.Server{
+	control = &testcontrol.Server{
 		Logf:           logger.WithPrefix(t.Logf, "testcontrol: "),
 		DERPMap:        derpMap,
 		RequireAuthKey: authKey,
@@ -81,14 +88,41 @@ func TestAndroidAuthKeyLogin(t *testing.T) {
 	controlServer := httptest.NewServer(control)
 	t.Cleanup(controlServer.Close)
 
-	controlURL := rewriteHost(t, controlServer.URL, *emulatorHost)
-	control.ExplicitBaseURL = controlURL
-	t.Logf("test control URL for Android: %s", controlURL)
+	androidURL = rewriteHost(t, controlServer.URL, *emulatorHost)
+	control.ExplicitBaseURL = androidURL
+	t.Logf("test control URL for Android: %s", androidURL)
+	return control, controlServer.URL, androidURL
+}
+
+// installAndLogin installs the APK fresh and logs it in to controlURL with the
+// test auth key.
+func installAndLogin(t *testing.T, adb adbRunner, controlURL string) {
+	t.Helper()
+	adb.run(t, "wait-for-device")
+	adb.run(t, "install", "-r", "-t", *apkPath)
+	t.Cleanup(func() { adb.runAllowError(t, "shell", "am", "force-stop", androidPackage) })
+	adb.run(t, "shell", "appops", "set", androidPackage, "ACTIVATE_VPN", "allow")
+	adb.run(t, "shell", "am", "force-stop", androidPackage)
+	adb.run(t, "shell", "pm", "clear", androidPackage)
+
+	adb.run(t,
+		"shell", "am", "broadcast",
+		"-a", loginAction,
+		"-n", androidPackage+"/.IPNReceiver",
+		"--include-stopped-packages",
+		"--es", "control_url", controlURL,
+		"--es", "auth_key", authKey,
+	)
+}
+
+func TestAndroidAuthKeyLogin(t *testing.T) {
+	requireAndroid(t)
+	control, localControlURL, controlURL := startTestControl(t)
 
 	const wantBody = "hello-from-tsnet-android-integration"
 	peer := &tsnet.Server{
 		Dir:        t.TempDir(),
-		ControlURL: controlServer.URL,
+		ControlURL: localControlURL,
 		AuthKey:    authKey,
 		Hostname:   "tsnetpeer",
 		Ephemeral:  true,
@@ -119,25 +153,12 @@ func TestAndroidAuthKeyLogin(t *testing.T) {
 	}))
 
 	adb := adbRunner{path: *adbPath, serial: *adbSerial}
-	adb.run(t, "wait-for-device")
-	adb.run(t, "install", "-r", "-t", *apkPath)
 	probePath := buildAndroidProbe(t)
 	probeAPKPath := buildProbeAPK(t, probePath)
+	adb.run(t, "wait-for-device")
 	adb.run(t, "install", "-r", "-t", probeAPKPath)
 	t.Cleanup(func() { adb.runAllowError(t, "uninstall", probePackage) })
-	t.Cleanup(func() { adb.runAllowError(t, "shell", "am", "force-stop", androidPackage) })
-	adb.run(t, "shell", "appops", "set", androidPackage, "ACTIVATE_VPN", "allow")
-	adb.run(t, "shell", "am", "force-stop", androidPackage)
-	adb.run(t, "shell", "pm", "clear", androidPackage)
-
-	adb.run(t,
-		"shell", "am", "broadcast",
-		"-a", loginAction,
-		"-n", androidPackage+"/.IPNReceiver",
-		"--include-stopped-packages",
-		"--es", "control_url", controlURL,
-		"--es", "auth_key", authKey,
-	)
+	installAndLogin(t, adb, controlURL)
 
 	waitForNodeCount(t, control, 2)
 
