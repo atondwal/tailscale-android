@@ -266,7 +266,8 @@ func (a *App) runBackend(ctx context.Context, hardwareAttestation bool) error {
 			// regenerating the DNS config but have the means to do
 			// that independently of userspace engine network changes which may
 			// eliminate some unnecessary work.
-			go b.NetworkChanged(i)
+			// Called inline so updates apply in order
+			b.NetworkChanged(i)
 		}
 	}
 }

@@ -211,6 +211,11 @@ object NetworkChangeCallback {
       return
     }
 
+    if (info.linkProps.interfaceName == null) {
+      TSLog.d(TAG, "$why: default network has no link properties yet; not updating DNS")
+      return
+    }
+
     val sb = StringBuilder()
     for (ip in info.linkProps.dnsServers) {
       sb.append(ip.hostAddress).append(" ")

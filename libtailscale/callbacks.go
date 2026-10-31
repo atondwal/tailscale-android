@@ -32,9 +32,16 @@ var (
 
 // ifname is the interface name retrieved from LinkProperties on network change. An empty string is used if there is no network available.
 func OnDNSConfigChanged(ifname string) {
-	select {
-	case onDNSConfigChanged <- ifname:
-	default:
+	for {
+		select {
+		case onDNSConfigChanged <- ifname:
+			return
+		default:
+		}
+		select {
+		case <-onDNSConfigChanged:
+		default:
+		}
 	}
 }
 
